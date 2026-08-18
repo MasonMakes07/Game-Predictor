@@ -1,0 +1,35 @@
+name: Weekly Odds Update
+
+on:
+  schedule:
+    # Mondays at 15:00 UTC (10am ET in winter, 11am ET in summer).
+    - cron: "0 15 * * 1"
+  # Adds a manual "Run workflow" button for testing without waiting a week.
+  workflow_dispatch:
+
+jobs:
+  update-odds:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Only the three packages this job actually needs. Installing the full
+      # requirements.txt would pull in PyTorch (~800MB) for a job that never
+      # touches the model.
+      - name: Install dependencies
+        run: pip install requests python-dotenv supabase==2.31.0
+
+      - name: Fetch odds and store snapshot
+        working-directory: nba-win-prob
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python update_odds.py

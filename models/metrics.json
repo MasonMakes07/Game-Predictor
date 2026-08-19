@@ -1,0 +1,6 @@
+{
+  "accuracy": 0.6323,
+  "log_loss": 0.6356,
+  "brier_score": 0.2225,
+  "val_samples": 1776
+}

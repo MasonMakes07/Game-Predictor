@@ -89,3 +89,39 @@ def build_prediction_response(result):
         "homeMargin":  result.get("home_margin"),   # None if spread not calibrated
         "adjustments": [line.strip() for line in result.get("adjustments", [])],
     }
+
+
+# ── Shape one stored game plus its prediction for the frontend ────────────────
+def build_upcoming_game(game, prediction, home_abbr, away_abbr):
+    """
+    Merges a Supabase odds row with the model's prediction into the flat,
+    camelCase shape the dashboard renders. Returns None when the model could
+    not resolve a team, so the caller can count and skip it.
+    """
+    if prediction is None or "error" in prediction:
+        return None
+
+    return {
+        "gameId":       game["game_id"],
+        "commenceTime": game["commence_time"],
+        "homeTeam":     prediction["home_team"],
+        "awayTeam":     prediction["away_team"],
+        "homeAbbr":     home_abbr,
+        "awayAbbr":     away_abbr,
+        "homeProb":     prediction["home_win_prob"],
+        "awayProb":     prediction["away_win_prob"],
+        "homeMargin":   prediction.get("home_margin"),
+        "vegasSpread":  game.get("home_spread_avg"),
+        "books":        game.get("spreads") or {},
+    }
+
+
+# ── Shape the full upcoming-games payload ─────────────────────────────────────
+def build_upcoming_response(games, unmatched, metrics):
+    """Wraps the shaped game list with the model metrics the sidebar shows."""
+    return {
+        "games":     games,
+        "count":     len(games),
+        "unmatched": unmatched,
+        "metrics":   metrics or {},
+    }

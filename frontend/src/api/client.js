@@ -13,6 +13,16 @@ export async function fetchTeams() {
   return data.teams;
 }
 
+// Fetches upcoming games (stored in Supabase) with predictions from /upcoming.
+export async function fetchUpcoming() {
+  const response = await fetch(`${API_BASE}/upcoming`);
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || `Failed to load games (HTTP ${response.status})`);
+  }
+  return data;
+}
+
 // Requests a win probability from POST /predict, with optional injuries.
 export async function predictGame({
   homeTeam,

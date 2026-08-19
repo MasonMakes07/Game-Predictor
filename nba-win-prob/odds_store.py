@@ -56,6 +56,30 @@ def save_odds_snapshot(games):
     return len(rows)
 
 
+# ── Read the newest stored snapshot for each upcoming game ────────────────────
+def fetch_latest_games():
+    """
+    Returns the most recent snapshot row per game_id, ordered by tip-off time,
+    so each upcoming game appears once with its freshest spread.
+    """
+    response = (
+        get_client()
+        .table(TABLE_NAME)
+        .select("*")
+        .order("fetched_at", desc=True)
+        .execute()
+    )
+
+    latest_by_game = {}
+    for row in response.data:
+        # Rows arrive newest-first, so the first sighting of a game_id wins.
+        latest_by_game.setdefault(row["game_id"], row)
+
+    return sorted(
+        latest_by_game.values(), key=lambda game: game["commence_time"]
+    )
+
+
 # ── Standalone test run ────────────────────────────────────────────────────────
 def main():
     """Fetches live spreads and saves them as a new snapshot, for a quick test."""

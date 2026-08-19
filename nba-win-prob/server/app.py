@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import numpy as np
@@ -11,7 +12,12 @@ from flask_socketio import SocketIO, emit
 # Allow importing from the parent nba-win-prob directory
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from injury_adjust import fetch_player_stats, apply_injury_adjustments
-from Translator import parse_predict_request, build_prediction_response
+from Translator import (
+    parse_predict_request,
+    build_prediction_response,
+    build_upcoming_game,
+    build_upcoming_response,
+)
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 _DIR            = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +25,7 @@ MODEL_PATH      = os.path.join(_DIR, "..", "..", "models", "best_model.pt")
 SCALER_PATH     = os.path.join(_DIR, "..", "..", "models", "scaler.npy")
 SIGMA_PATH      = os.path.join(_DIR, "..", "..", "models", "spread_sigma.npy")
 TEAM_STATS_PATH = os.path.join(_DIR, "..", "..", "data",   "team_stats_latest.parquet")
+METRICS_PATH    = os.path.join(_DIR, "..", "..", "models", "metrics.json")
 PORT            = 5000
 PROB_EPS        = 1e-4   # clip win prob away from 0/1 before norm.ppf (avoids ±inf)
 
@@ -98,18 +105,49 @@ def load_assets():
     return model, scaler_mean, scaler_scale, team_stats, player_stats, spread_sigma
 
 
+# ── Load saved validation metrics, if evaluate_model.py has been run ──────────
+def load_metrics():
+    """
+    Returns the dict written by evaluate_model.py, or an empty dict when the
+    file is absent so the server still starts without it.
+    """
+    if not os.path.exists(METRICS_PATH):
+        print(
+            f"[METRICS] {METRICS_PATH} not found — accuracy hidden. "
+            "Run: python nba-win-prob/evaluate_model.py"
+        )
+        return {}
+
+    with open(METRICS_PATH, encoding="utf-8") as metrics_file:
+        metrics = json.load(metrics_file)
+    print(f"[METRICS] Validation accuracy {metrics.get('accuracy', 0):.1%}")
+    return metrics
+
+
 # ── Fuzzy team name lookup ────────────────────────────────────────────────────
 def find_team(name, team_stats):
     """
-    Finds a team by matching the input against full team name or abbreviation
-    (case-insensitive). Returns the matching row as a Series or None.
+    Finds a team by full name, abbreviation, or nickname (case-insensitive).
+    Returns the matching row as a Series or None.
     """
     name_lower = name.strip().lower()
+    if not name_lower:
+        return None
+
     for _, row in team_stats.iterrows():
         if (
             name_lower in row["TEAM_NAME"].lower()
             or name_lower == row["TEAM_ABBREVIATION"].lower()
         ):
+            return row
+
+    # Fall back to the nickname, which is unique across all 30 teams. The odds
+    # feed says "Los Angeles Clippers" while team_stats says "LA Clippers", and
+    # the substring test above fails whenever the caller supplies the longer
+    # of the two spellings.
+    nickname = name_lower.split()[-1]
+    for _, row in team_stats.iterrows():
+        if row["TEAM_NAME"].lower().split()[-1] == nickname:
             return row
     return None
 
@@ -202,6 +240,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 MAX_BODY_BYTES = 10_000   # predict payloads are tiny; anything bigger is abuse
 
 model, scaler_mean, scaler_scale, team_stats, player_stats, spread_sigma = load_assets()
+model_metrics = load_metrics()
 
 
 # ── Middleware: basic request hygiene before any route runs ───────────────────
@@ -250,7 +289,52 @@ def health():
         "features":       N_FEATURES,
         "teams_loaded":   len(team_stats),
         "spread_enabled": spread_sigma is not None,
+        "metrics":        model_metrics,
     })
+
+
+# ── GET /upcoming ─────────────────────────────────────────────────────────────
+@app.route("/upcoming", methods=["GET"])
+def upcoming():
+    """
+    Returns every upcoming game stored in Supabase, each with the model's
+    win probability and the stored Vegas line, for the dashboard list.
+    """
+    # Imported lazily so the server still starts when Supabase is unconfigured
+    # — only this one endpoint depends on it.
+    try:
+        from odds_store import fetch_latest_games
+        stored_games = fetch_latest_games()
+    except Exception as error:
+        return jsonify({"error": f"Odds store unavailable: {error}"}), 503
+
+    shaped_games = []
+    unmatched    = 0
+
+    for game in stored_games:
+        prediction = predict_matchup(
+            game["home_team"], game["away_team"],
+            model, scaler_mean, scaler_scale, team_stats, player_stats,
+            spread_sigma=spread_sigma,
+        )
+
+        home_row = find_team(game["home_team"], team_stats)
+        away_row = find_team(game["away_team"], team_stats)
+        shaped = build_upcoming_game(
+            game,
+            prediction,
+            home_row["TEAM_ABBREVIATION"] if home_row is not None else "",
+            away_row["TEAM_ABBREVIATION"] if away_row is not None else "",
+        )
+
+        if shaped is None:
+            unmatched += 1
+            continue
+        shaped_games.append(shaped)
+
+    return jsonify(
+        build_upcoming_response(shaped_games, unmatched, model_metrics)
+    )
 
 
 # ── GET /teams ────────────────────────────────────────────────────────────────

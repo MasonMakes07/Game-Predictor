@@ -1,4 +1,13 @@
+import sys
+
 import requests
+
+# Windows uses the console API for an interactive terminal but falls back to
+# cp1252 when output is redirected, and cp1252 cannot encode this file's
+# box-drawing bar or accented player names ("Luka Dončić"). Forcing UTF-8
+# keeps `python simulate_game.py > out.txt` from dying on a UnicodeEncodeError.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 SERVER_URL = "http://localhost:5000"
@@ -30,9 +39,13 @@ def confidence_label(prob):
 
 # ── Side-by-side stats table for both teams ───────────────────────────────────
 def print_stats_comparison(away_stats, home_stats, away_name, home_name):
-    """Prints a formatted side-by-side stat breakdown for both teams."""
+    """Prints a side-by-side season-average stat breakdown for both teams."""
     col = 20
-    print(f"\n  {'Stat':<16}  {away_name:^{col}}  {home_name:^{col}}")
+    # These come from /teams, which serves raw season stats. The injury
+    # adjustments above are applied only to the model's feature vector, so
+    # the table is labelled to stop it reading as a contradiction.
+    print("\n  Season averages — not adjusted for injuries")
+    print(f"  {'Stat':<16}  {away_name:^{col}}  {home_name:^{col}}")
     print(f"  {'─' * 16}  {'─' * col}  {'─' * col}")
     for label, key, fmt in STAT_ROWS:
         a_val = away_stats.get(key)

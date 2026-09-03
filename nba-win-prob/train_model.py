@@ -1,14 +1,25 @@
 import os
 import numpy as np
 import pandas as pd
+import matplotlib
+# Non-interactive backend: plots are written to models/ rather than opened in a
+# window, so the script runs unattended (CI, background, piped output).
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+
+from evaluation import (
+    TEST_SEASON,
+    VAL_SEASON,
+    metrics_payload,
+    save_json,
+    split_by_season,
+)
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import (
     accuracy_score, log_loss, brier_score_loss,
@@ -20,6 +31,8 @@ DATA_PATH   = "data/matchup_features.parquet"
 MODEL_DIR   = "models"
 MODEL_PATH  = os.path.join(MODEL_DIR, "best_model.pt")
 SCALER_PATH = os.path.join(MODEL_DIR, "scaler.npy")
+# Read by server/app.py for /health and shown in the dashboard sidebar.
+METRICS_PATH = os.path.join(MODEL_DIR, "metrics.json")
 
 FEATURE_COLS = [
     "win_pct_home",        "ppg_home",
@@ -37,7 +50,6 @@ N_FEATURES  = len(FEATURE_COLS)
 BATCH_SIZE    = 256
 EPOCHS        = 500
 LEARNING_RATE = 1e-4
-VAL_SPLIT     = 0.2
 RANDOM_SEED      = 42
 LABEL_SMOOTHING  = 0.1   # smooths 0→0.05, 1→0.95 to prevent overconfidence
 PATIENCE         = 20    # stop after this many epochs with no val-loss improvement
@@ -90,30 +102,44 @@ class WinProbModel(nn.Module):
 
 # ── 3. Load and prepare data ──────────────────────────────────────────────────
 def load_data():
-    """Loads matchup features, scales them, and splits into train/val sets."""
+    """
+    Loads matchup features and splits them chronologically, scaling with a
+    scaler fit on the training fold only. Returns six arrays: train, val, test.
+    """
     print("[LOADING] Reading matchup_features.parquet...")
     df = pd.read_parquet(DATA_PATH).dropna(subset=FEATURE_COLS + [LABEL_COL])
 
     print(f"  Total matchups : {len(df):,}")
     print(f"  Home win rate  : {df[LABEL_COL].mean():.1%}")
 
-    X = df[FEATURE_COLS].values.astype(np.float32)
-    y = df[LABEL_COL].values.astype(np.float32)
+    # Chronological, not random. A random split puts a team's game N and game
+    # N+1 — whose cumulative features are near-identical — on opposite sides,
+    # which inflates every metric and corrupts early-stopping selection.
+    train_df, val_df, test_df = split_by_season(df)
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=VAL_SPLIT, random_state=RANDOM_SEED
-    )
+    def to_arrays(frame):
+        """Extracts the feature matrix and label vector from a split frame."""
+        return (
+            frame[FEATURE_COLS].values.astype(np.float32),
+            frame[LABEL_COL].values.astype(np.float32),
+        )
+
+    X_train, y_train = to_arrays(train_df)
+    X_val,   y_val   = to_arrays(val_df)
+    X_test,  y_test  = to_arrays(test_df)
 
     scaler  = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_val   = scaler.transform(X_val)
+    X_test  = scaler.transform(X_test)
 
     np.save(SCALER_PATH, np.array([scaler.mean_, scaler.scale_]))
     print(f"  Scaler saved to {SCALER_PATH}")
-    print(f"  Train rows     : {len(X_train):,}")
-    print(f"  Val rows       : {len(X_val):,}")
+    print(f"  Train rows     : {len(X_train):,}  (seasons before {VAL_SEASON})")
+    print(f"  Val rows       : {len(X_val):,}  (season {VAL_SEASON}, early stopping)")
+    print(f"  Test rows      : {len(X_test):,}  (season {TEST_SEASON}, held out)")
 
-    return X_train, X_val, y_train, y_val
+    return X_train, y_train, X_val, y_val, X_test, y_test
 
 
 # ── 4. Training loop ──────────────────────────────────────────────────────────
@@ -256,7 +282,6 @@ def evaluate(model, X_val, y_val):
 
     plt.tight_layout()
     plt.savefig("models/evaluation.png", dpi=150)
-    plt.show()
     print("\n  Evaluation chart saved to models/evaluation.png")
 
     return acc, loss, brier
@@ -275,7 +300,6 @@ def plot_training_curves(train_losses, val_losses):
     plt.grid(alpha=0.3)
     plt.tight_layout()
     plt.savefig("models/training_curves.png", dpi=150)
-    plt.show()
     print("  Training curves saved to models/training_curves.png")
 
 
@@ -287,7 +311,7 @@ def main():
     np.random.seed(RANDOM_SEED)
 
     # 1. Load data
-    X_train, X_val, y_train, y_val = load_data()
+    X_train, y_train, X_val, y_val, X_test, y_test = load_data()
 
     # 2. DataLoaders
     train_dl = DataLoader(
@@ -310,19 +334,33 @@ def main():
     # 4. Train
     _, _ = train(model, train_dl, val_dl, optimizer, criterion, scheduler)
 
-    # 5. Load best weights and evaluate
+    # 5. Load best weights and evaluate on the held-out season. Validation was
+    #    used for early stopping, so scoring on it would be optimistic.
     model.load_state_dict(torch.load(MODEL_PATH, weights_only=True))
-    acc, loss, brier = evaluate(model, X_val, y_val)
+    acc, loss, brier = evaluate(model, X_test, y_test)
 
-    print(f"\n[SUMMARY]")
+    print(f"\n[SUMMARY] Held-out season {TEST_SEASON}-"
+          f"{str(TEST_SEASON + 1)[-2:]}  ({len(y_test):,} games)")
     print(f"  Accuracy    : {acc:.1%}")
     print(f"  Log-loss    : {loss:.4f}")
     print(f"  Brier score : {brier:.4f}")
 
-    if acc >= 0.60:
-        print("\n  Model is ready — run server/app.py next!")
-    else:
-        print("\n  Tip: try adding more features in build_features.py")
+    # Persist the held-out scores so the server and the writeup read the same
+    # numbers that were just printed, rather than a stale earlier run.
+    model.eval()
+    with torch.no_grad():
+        test_probs = model(
+            torch.tensor(X_test, dtype=torch.float32)
+        ).squeeze(1).numpy()
+
+    saved_to = save_json(
+        METRICS_PATH,
+        metrics_payload("mlp_pytorch_3layer", y_test, test_probs),
+    )
+    print(f"  Metrics saved to {saved_to}")
+
+    print("\n  Compare against Elo and the trivial baseline:")
+    print("    python nba-win-prob/compare_models.py")
 
 
 if __name__ == "__main__":

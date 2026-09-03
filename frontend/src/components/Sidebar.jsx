@@ -30,10 +30,11 @@ export default function Sidebar({ view, onSelectView, metrics }) {
 
       {metrics?.accuracy != null && (
         <div className="metric-card">
-          <p className="metric-label">Model accuracy (validation)</p>
+          <p className="metric-label">Model accuracy</p>
           <p className="metric-value">{(metrics.accuracy * 100).toFixed(1)}%</p>
           <p className="metric-sub">
-            {metrics.val_samples?.toLocaleString()} held-out games
+            {metrics.eval_split ?? "held-out season"} ·{" "}
+            {metrics.val_samples?.toLocaleString()} games
           </p>
         </div>
       )}

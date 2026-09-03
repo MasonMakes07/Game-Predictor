@@ -1,6 +1,8 @@
 {
-  "accuracy": 0.6323,
-  "log_loss": 0.6356,
-  "brier_score": 0.2225,
-  "val_samples": 1776
+  "accuracy": 0.6719,
+  "log_loss": 0.614,
+  "brier_score": 0.2124,
+  "val_samples": 1146,
+  "model": "mlp_pytorch_3layer",
+  "eval_split": "held-out season 2025-26"
 }

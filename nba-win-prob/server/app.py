@@ -105,22 +105,27 @@ def load_assets():
     return model, scaler_mean, scaler_scale, team_stats, player_stats, spread_sigma
 
 
-# ── Load saved validation metrics, if evaluate_model.py has been run ──────────
+# ── Load held-out metrics written by the training / comparison scripts ────────
 def load_metrics():
     """
-    Returns the dict written by evaluate_model.py, or an empty dict when the
-    file is absent so the server still starts without it.
+    Returns the dict written by train_model.py or compare_models.py, or an
+    empty dict when the file is absent so the server still starts without it.
     """
     if not os.path.exists(METRICS_PATH):
         print(
             f"[METRICS] {METRICS_PATH} not found — accuracy hidden. "
-            "Run: python nba-win-prob/evaluate_model.py"
+            "Run: python nba-win-prob/compare_models.py"
         )
         return {}
 
     with open(METRICS_PATH, encoding="utf-8") as metrics_file:
         metrics = json.load(metrics_file)
-    print(f"[METRICS] Validation accuracy {metrics.get('accuracy', 0):.1%}")
+
+    split_label = metrics.get("eval_split", "unknown split")
+    print(
+        f"[METRICS] {metrics.get('accuracy', 0):.1%} accuracy on "
+        f"{split_label} ({metrics.get('val_samples', 0):,} games)"
+    )
     return metrics
 
 

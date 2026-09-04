@@ -183,3 +183,5 @@ cython_debug/
 # Private project context — share manually, do not commit
 CONTEXT.md
 CLAUDE.md
+# Personal model reference notes — not part of the repo
+MODEL_NOTES.md

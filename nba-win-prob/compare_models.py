@@ -20,7 +20,7 @@ from evaluation import (
 # Imported rather than redefined so there is never a second copy of the
 # architecture to drift out of sync (Lessons.md #1).
 from train_model import FEATURE_COLS, LABEL_COL, WinProbModel
-from train_gbdt import SITUATIONAL_COLS, add_situational_features
+from train_gbdt import add_situational_features, gbdt_feature_cols
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -70,7 +70,7 @@ def gbdt_probs(frame):
         return None
 
     booster = lgb.Booster(model_file=GBDT_PATH)
-    return booster.predict(frame[FEATURE_COLS + SITUATIONAL_COLS])
+    return booster.predict(frame[gbdt_feature_cols()])
 
 
 # ── Assemble every model's predictions for the held-out season ────────────────

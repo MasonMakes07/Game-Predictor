@@ -193,8 +193,8 @@ def print_comparison(results):
     it obvious when two models are not actually distinguishable.
     """
     print(f"\n  Held-out season — n = {results[0]['n']:,} games\n")
-    print(f"  {'Model':<24}{'Accuracy':<26}{'Log loss':<26}{'Brier':<26}")
-    print(f"  {'-' * 24}{'-' * 26}{'-' * 26}{'-' * 26}")
+    print(f"  {'Model':<28}{'Accuracy':<26}{'Log loss':<26}{'Brier':<26}")
+    print(f"  {'-' * 28}{'-' * 26}{'-' * 26}{'-' * 26}")
 
     for row in results:
         cells = []
@@ -206,7 +206,7 @@ def print_comparison(results):
                 f"{format(row[metric], fmt)} "
                 f"[{format(low, fmt)}, {format(high, fmt)}]"
             )
-        print(f"  {row['name']:<24}{cells[0]:<26}{cells[1]:<26}{cells[2]:<26}")
+        print(f"  {row['name']:<28}{cells[0]:<26}{cells[1]:<26}{cells[2]:<26}")
     print()
 
 

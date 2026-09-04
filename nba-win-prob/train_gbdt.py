@@ -41,6 +41,12 @@ SITUATIONAL_COLS = [
     "home_third_in_four", "away_third_in_four",
 ]
 
+# ablate_features.py showed the schedule features do not help: on the held-out
+# season they cost +0.0018 log loss and helped in only 15% of bootstrap
+# resamples. They stay defined so the ablation can still be reproduced, but the
+# shipped booster trains on the 19 engineered features alone.
+USE_SITUATIONAL = False
+
 LGB_PARAMS = {
     "objective":        "binary",
     "metric":           "binary_logloss",
@@ -54,6 +60,12 @@ LGB_PARAMS = {
     "verbosity":        -1,
     "seed":             RANDOM_SEED,
 }
+
+
+# ── The feature set the shipped booster trains and predicts on ────────────────
+def gbdt_feature_cols():
+    """Returns the booster's columns, so training and inference cannot drift."""
+    return FEATURE_COLS + (SITUATIONAL_COLS if USE_SITUATIONAL else [])
 
 
 # ── Derive schedule context for every team-game ───────────────────────────────
@@ -197,11 +209,12 @@ def main():
     frame = pd.read_parquet(DATA_PATH).dropna(subset=FEATURE_COLS + [LABEL_COL])
     frame = add_situational_features(frame)
 
-    feature_cols = FEATURE_COLS + SITUATIONAL_COLS
+    feature_cols = gbdt_feature_cols()
     train_df, val_df, test_df = split_by_season(frame)
 
+    situational_used = len(feature_cols) - len(FEATURE_COLS)
     print(f"[GBDT] {len(feature_cols)} features ({len(FEATURE_COLS)} engineered "
-          f"+ {len(SITUATIONAL_COLS)} situational)")
+          f"+ {situational_used} situational)")
     print(f"  Train : {len(train_df):,}  (seasons before {VAL_SEASON})")
     print(f"  Val   : {len(val_df):,}  (season {VAL_SEASON})")
     print(f"  Test  : {len(test_df):,}  (season {TEST_SEASON}, held out)\n")

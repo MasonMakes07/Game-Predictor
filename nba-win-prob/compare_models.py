@@ -1,6 +1,7 @@
 import os
 import sys
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import torch
@@ -19,6 +20,7 @@ from evaluation import (
 # Imported rather than redefined so there is never a second copy of the
 # architecture to drift out of sync (Lessons.md #1).
 from train_model import FEATURE_COLS, LABEL_COL, WinProbModel
+from train_gbdt import SITUATIONAL_COLS, add_situational_features
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -28,6 +30,7 @@ _ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_PATH   = os.path.join(_ROOT, "data",   "matchup_features.parquet")
 MODEL_PATH  = os.path.join(_ROOT, "models", "best_model.pt")
 SCALER_PATH = os.path.join(_ROOT, "models", "scaler.npy")
+GBDT_PATH   = os.path.join(_ROOT, "models", "gbdt_model.txt")
 METRICS_PATH    = os.path.join(_ROOT, "models", "metrics.json")
 COMPARISON_PATH = os.path.join(_ROOT, "models", "comparison.json")
 
@@ -57,6 +60,19 @@ def mlp_probs(frame):
         ).squeeze(1).numpy()
 
 
+# ── Score the saved LightGBM booster on a set of games ────────────────────────
+def gbdt_probs(frame):
+    """
+    Loads gbdt_model.txt and returns its predicted home win probability per
+    row, or None if the booster has not been trained yet.
+    """
+    if not os.path.exists(GBDT_PATH):
+        return None
+
+    booster = lgb.Booster(model_file=GBDT_PATH)
+    return booster.predict(frame[FEATURE_COLS + SITUATIONAL_COLS])
+
+
 # ── Assemble every model's predictions for the held-out season ────────────────
 def build_predictions():
     """
@@ -64,6 +80,10 @@ def build_predictions():
     predicted probabilities per model, aligned on GAME_ID.
     """
     frame = pd.read_parquet(DATA_PATH).dropna(subset=FEATURE_COLS + [LABEL_COL])
+    # Schedule context is derived across every season before splitting, so a
+    # team's rest is measured against its own prior game rather than the first
+    # game that happens to fall inside the held-out slice.
+    frame = add_situational_features(frame)
     _, _, test_df = split_by_season(frame)
 
     # Elo must see every season to build its ratings, then we keep only the
@@ -81,6 +101,10 @@ def build_predictions():
     if mlp is not None:
         predictions["mlp"] = mlp
 
+    gbdt = gbdt_probs(test_df)
+    if gbdt is not None:
+        predictions["gbdt"] = gbdt
+
     return predictions
 
 
@@ -95,6 +119,11 @@ def main():
         models.append(("MLP (temporal)", "mlp"))
     else:
         print("\n  [WARN] models/best_model.pt not found — MLP row skipped.")
+
+    if "gbdt" in predictions.columns:
+        models.append(("GBDT (LightGBM)", "gbdt"))
+    else:
+        print("  [WARN] models/gbdt_model.txt not found — GBDT row skipped.")
 
     results = [
         evaluate_model(label, y_true, predictions[column].values)

@@ -31,16 +31,20 @@ INK_MUTED = "#898781"
 GRID      = "#e1e0d9"
 AXIS      = "#c3c2b7"
 
+# Slot 4 (yellow) is deliberately skipped: beside slot 2 orange it fails the
+# all-pairs normal-vision floor. Violet is the validated four-series option.
 MODEL_COLORS = {
-    "Always home":    "#2a78d6",   # slot 1, blue
-    "Elo":            "#eb6834",   # slot 2, orange
-    "MLP (temporal)": "#1baf7a",   # slot 3, aqua
+    "Always home":     "#2a78d6",   # slot 1, blue
+    "Elo":             "#eb6834",   # slot 2, orange
+    "MLP (temporal)":  "#1baf7a",   # slot 3, aqua
+    "GBDT (LightGBM)": "#4a3aa7",   # slot 7, violet
 }
 # Columns in the predictions frame, in display order.
 MODEL_COLUMNS = [
-    ("Always home",    "always_home"),
-    ("Elo",            "elo_prob"),
-    ("MLP (temporal)", "mlp"),
+    ("Always home",     "always_home"),
+    ("Elo",             "elo_prob"),
+    ("MLP (temporal)",  "mlp"),
+    ("GBDT (LightGBM)", "gbdt"),
 ]
 REFERENCE = ("Elo", "elo_prob")
 
